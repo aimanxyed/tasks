@@ -1,0 +1,269 @@
+query 1 List all employees with their department name and current salary. Include employees who have no salary record yet.
+
+SELECT
+    e.Name AS EmployeeName,
+    d.DepartmentName,
+    e.Salary
+FROM Employees e
+LEFT JOIN Departments d
+    ON e.DepartmentID = d.DepartmentID;
+
+query2 Show all departments along with the number of employees in each. Include departments that currently have zero employees.
+
+SELECT
+    d.DepartmentName,
+    COUNT(e.Id) AS NumberOfEmployees
+FROM Departments d
+LEFT JOIN Employees e
+    ON d.DepartmentID = e.DepartmentID
+GROUP BY d.DepartmentID, d.DepartmentName;
+
+query3Find employees who are not assigned to any project. Display their name, department name, and hire date.
+
+SELECT
+    e.Name AS EmployeeName,
+    d.DepartmentName,
+    e.HireDate
+FROM Employees e
+LEFT JOIN Departments d
+    ON e.DepartmentID = d.DepartmentID
+LEFT JOIN EmployeeProjects ep
+    ON e.Id = ep.EmployeeID
+WHERE ep.EmployeeID IS NULL;
+
+query4 For each department, show the total salary expenditure, average salary, and number of employees. Order results by total salary descending.
+
+SELECT
+    d.DepartmentName,
+    SUM(e.Salary) AS TotalSalaryExpenditure,
+    AVG(e.Salary) AS AverageSalary,
+    COUNT(e.Id) AS NumberOfEmployees
+FROM Departments d
+LEFT JOIN Employees e
+    ON d.DepartmentID = e.DepartmentID
+GROUP BY d.DepartmentID, d.DepartmentName
+ORDER BY TotalSalaryExpenditure DESC;
+
+query5 Display each employee alongside their manager's name. If an employee has no manager, still show the employee row.
+
+SELECT 
+    e.Name AS EmployeeName,
+    m.Name AS ManagerName
+FROM Employees e
+LEFT JOIN Employees m
+    ON e.ManagerID = m.Id;
+
+query6 List each project with the number of employees assigned and total hours logged. Only show projects with more than 3 employees. Order by total hours descending.
+
+SELECT 
+    p.ProjectName,
+    COUNT(ep.EmployeeID) AS number_of_employees,
+    SUM(ep.HoursWorked) AS total_hours_logged
+FROM Projects p
+LEFT JOIN EmployeeProjects ep
+    ON p.ProjectID = ep.ProjectID
+GROUP BY p.ProjectID, p.ProjectName
+HAVING COUNT(ep.EmployeeID) > 3
+ORDER BY total_hours_logged DESC;
+
+query7 Generate a report showing every combination of department and project, along with the count of employees from that department working on that project. Include combinations where the count is zero.
+
+SELECT
+    d.DepartmentName,
+    p.ProjectName,
+    COUNT(ep.EmployeeID) AS EmployeeCount
+FROM Departments d
+CROSS JOIN Projects p
+LEFT JOIN Employees e
+    ON e.DepartmentID = d.DepartmentID
+LEFT JOIN EmployeeProjects ep
+    ON ep.EmployeeID = e.Id
+    AND ep.ProjectID = p.ProjectID
+GROUP BY
+    d.DepartmentID,
+    d.DepartmentName,
+    p.ProjectID,
+    p.ProjectName
+ORDER BY
+    d.DepartmentName,
+    p.ProjectName; 
+
+query8 Write a scalar function fn_get_emp_tenure that accepts an employee ID and returns the number of full years that employee has worked, based on their hire date. Test it by calling it in a SELECT alongside employee names.
+
+DELIMITER $$
+
+CREATE FUNCTION fn_get_emp_tenure(emp_id INT)
+RETURNS INT
+DETERMINISTIC
+BEGIN
+    DECLARE years_worked INT;
+
+    SELECT TIMESTAMPDIFF(YEAR, HireDate, CURDATE())
+    INTO years_worked
+    FROM Employees
+    WHERE Id = emp_id;
+
+    RETURN years_worked;
+END $$
+
+DELIMITER ;
+
+//to check the fn
+SELECT 
+    Name,
+    fn_get_emp_tenure(Id) AS TenureYears
+FROM Employees;
+
+### Task 9 — Scalar Function: Annual Salary Write a scalar function fn_annual_salary that accepts an employee ID and returns their current annual salary. Account for both monthly and annual salary types. Return 0 if no salary record exists.
+DELIMITER $$
+
+CREATE FUNCTION fn_annual_salary(emp_id INT)
+RETURNS DECIMAL(10,2)
+DETERMINISTIC
+BEGIN
+    DECLARE monthly_salary DECIMAL(10,2);
+    DECLARE annual_salary DECIMAL(10,2);
+
+    -- Get salary from employee table
+    SELECT Salary
+    INTO monthly_salary
+    FROM Employees
+    WHERE Id = emp_id;
+
+    -- If no record found or salary is NULL
+    IF monthly_salary IS NULL THEN
+        RETURN 0;
+    END IF;
+
+    -- Convert monthly to annual
+    SET annual_salary = monthly_salary * 12;
+
+    RETURN annual_salary;
+END $$
+
+DELIMITER ;
+
+//for test 
+SELECT 
+    Name,
+    fn_annual_salary(Id) AS AnnualSalary
+FROM Employees;
+
+# Task 10 — Table-Valued Function: Department Employee List
+##Write an inline table-valued function `fn_dept_employees` that accepts a department ID and returns all employees in that department along with their salary and tenure.
+
+##Use it with `CROSS APPLY` against the Departments table to return results for all departments at once.
+
+//cant apply table valued fns and cross apply in the mysql.
+
+SELECT 
+    d.DepartmentName,
+    e.Id,
+    e.Name,
+    e.Salary,
+    TIMESTAMPDIFF(YEAR, e.HireDate, CURDATE()) AS TenureYears
+FROM Departments d
+JOIN Employees e
+    ON d.DepartmentID = e.DepartmentID;
+
+### Task 11 — Stored Procedure: Department Salary Report
+Write a stored procedure `sp_dept_salary_report` that accepts a department ID and:
+- Returns a result set of all employees in that department with their salaries
+- Returns via output parameters: employee count, total salary, average salary, and the name of the highest earner
+
+DELIMITER $$
+
+CREATE PROCEDURE sp_dept_salary_report(
+    IN p_DepartmentID INT,
+    OUT p_EmployeeCount INT,
+    OUT p_TotalSalary DECIMAL(10,2),
+    OUT p_AverageSalary DECIMAL(10,2),
+    OUT p_HighestEarner VARCHAR(100)
+)
+BEGIN
+
+    -- 1. Return all employees in the department
+    SELECT
+        Name,
+        Salary
+    FROM Employees
+    WHERE DepartmentID = p_DepartmentID;
+
+    -- 2. Employee count
+    SELECT COUNT(*)
+    INTO p_EmployeeCount
+    FROM Employees
+    WHERE DepartmentID = p_DepartmentID;
+
+    -- 3. Total salary
+    SELECT COALESCE(SUM(Salary), 0)
+    INTO p_TotalSalary
+    FROM Employees
+    WHERE DepartmentID = p_DepartmentID;
+
+    -- 4. Average salary
+    SELECT COALESCE(AVG(Salary), 0)
+    INTO p_AverageSalary
+    FROM Employees
+    WHERE DepartmentID = p_DepartmentID;
+
+    -- 5. Highest earner's name
+    SELECT Name
+    INTO p_HighestEarner
+    FROM Employees
+    WHERE DepartmentID = p_DepartmentID
+    ORDER BY Salary DESC
+    LIMIT 1;
+
+END $$
+
+DELIMITER ;
+//forcheck
+SET @EmployeeCount = 0;
+SET @TotalSalary = 0;
+SET @AverageSalary = 0;
+SET @HighestEarner = '';
+CALL sp_dept_salary_report(
+    1,
+    @EmployeeCount,
+    @TotalSalary,
+    @AverageSalary,
+    @HighestEarner
+);
+SET @EmployeeCount = 0;
+SET @TotalSalary = 0;
+SET @AverageSalary = 0;
+SET @HighestEarner = '';
+SELECT
+    @EmployeeCount AS EmployeeCount,
+    @TotalSalary AS TotalSalary,
+    @AverageSalary AS AverageSalary,
+    @HighestEarner AS HighestEarner;
+
+### Task 12 — Stored Procedure: Give Department Raise Write a stored procedure sp_give_raise that accepts a department ID and a percentage value, and increases the salary of all active employees in that department by that percentage.
+
+DELIMITER $$
+
+CREATE PROCEDURE sp_give_raise(
+    IN p_DepartmentID INT,
+    IN p_Percentage DECIMAL(5,2)
+)
+BEGIN
+
+    UPDATE Employees
+    SET Salary = Salary + (Salary * p_Percentage / 100)
+    WHERE DepartmentID = p_DepartmentID
+      AND Status = 'Active';
+
+END $$
+
+DELIMITER ;
+//call the procedure 
+CALL sp_give_raise(1, 10);
+//verify
+SELECT
+    Name,
+    Salary
+FROM Employees
+WHERE DepartmentID = 1;
+

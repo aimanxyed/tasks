@@ -22,3 +22,5 @@ CREATE TABLE EmployeeProjects (
     FOREIGN KEY (EmployeeID) REFERENCES Employees(EmployeeID),
     FOREIGN KEY (ProjectID) REFERENCES Projects(ProjectID)
 );
+
+//added some columns later when running queries 

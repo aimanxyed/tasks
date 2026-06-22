@@ -1,0 +1,543 @@
+#Task 1
+#------
+#List all customers with their total number of orders and total
+#amount spent. Include customers who have never placed an order.
+#[RECAP: LEFT JOIN, COUNT, SUM, GROUP BY]
+
+SELECT C.Name, COUNT(o.OrderId)AS no_of_orders , COALESCE(SUM(o.TotalAmount), 0) AS amount_spent  FROM customers C LEFT JOIN orders o
+ON C.CustomerID= o.CustomerID GROUP BY C.Name,C.CustomerID
+
+#coalesce returns the first non null value in list.-- Task 2
+-- ------
+-- Find customers who have placed more than 3 orders but have at
+-- least one unpaid order. Show their name, total orders, and
+-- unpaid order count.
+-- [RECAP: INNER JOIN, HAVING, subquery]
+SELECT
+    c.CustomerID,
+    c.Name,
+    COUNT(o.OrderID) AS TotalOrders,
+    (
+        SELECT COUNT(*)
+        FROM Payments p
+        INNER JOIN Orders o2
+            ON p.OrderID = o2.OrderID
+        WHERE o2.CustomerID = c.CustomerID
+          AND p.Status = 'Pending'
+    ) AS UnpaidOrderCount
+FROM Customers c
+INNER JOIN Orders o
+    ON c.CustomerID = o.CustomerID
+GROUP BY
+    c.CustomerID,
+    c.Name
+HAVING
+    COUNT(o.OrderID) > 3
+    AND
+    (
+        SELECT COUNT(*)
+        FROM Payments p
+        INNER JOIN Orders o2
+            ON p.OrderID = o2.OrderID
+        WHERE o2.CustomerID = c.CustomerID
+          AND p.Status = 'Pending'
+    ) >= 1;
+-- Task 3
+-- ------
+-- For each product, show how many distinct customers have ordered
+-- it, total units sold, and total revenue generated. Order by
+-- revenue descending.
+-- [RECAP: INNER JOIN, COUNT DISTINCT, SUM, ORDER BY]
+
+SELECT
+    p.ProductID,
+    p.ProductName,
+    COUNT(DISTINCT o.CustomerID) AS DistinctCustomers,
+    SUM(oi.Quantity) AS TotalUnitsSold,
+    SUM(oi.Quantity * oi.UnitPrice) AS TotalRevenue
+FROM Products p
+INNER JOIN OrderItems oi
+    ON p.ProductID = oi.ProductID
+INNER JOIN Orders o
+    ON oi.OrderID = o.OrderID
+GROUP BY
+    p.ProductID,
+    p.ProductName
+ORDER BY
+    TotalRevenue DESC;
+-- Task 4
+-- ------
+-- Show each order alongside its payment status and the number of
+-- days between the order date and payment date. If unpaid, show
+-- NULL for the days column.
+-- [NEW: DATEDIFF, CASE WHEN]
+SELECT
+    o.OrderID,
+    o.CustomerID,
+    o.OrderDate,
+    p.`Status`,
+    CASE
+        WHEN p.`Status` = 'Paid'
+        THEN DATEDIFF(p.PaymentDate, o.OrderDate)
+        ELSE NULL
+    END AS DaysToPayment
+FROM Orders o
+LEFT JOIN payments p
+    ON o.OrderID = p.OrderID;
+-- Task 5
+-- ------
+-- Identify the top 3 best-selling products per product category
+-- by total units sold. Each category should show exactly its top 3.
+-- [NEW: ROW_NUMBER / RANK, PARTITION BY, CTE or subquery]
+
+WITH ProductSales AS
+(
+    SELECT
+        p.Category,
+        p.ProductID,
+        p.ProductName,
+        SUM(oi.Quantity) AS TotalUnitsSold,
+
+        ROW_NUMBER() OVER
+        (
+            PARTITION BY p.Category
+            ORDER BY SUM(oi.Quantity) DESC
+        ) AS RowNum
+
+    FROM Products p
+    INNER JOIN OrderItems oi
+        ON p.ProductID = oi.ProductID
+
+    GROUP BY
+        p.Category,
+        p.ProductID,
+        p.ProductName
+)
+
+SELECT
+    Category,
+    ProductID,
+    ProductName,
+    TotalUnitsSold
+FROM ProductSales
+WHERE RowNum <= 3
+ORDER BY
+    Category,
+    TotalUnitsSold DESC;
+-- Task 6
+-- ------
+-- Compare each customer's total spending against the average
+-- spending of all customers. Label each customer as:
+--   - Above Average
+--   - Average
+--   - Below Average
+-- [NEW: CASE WHEN, subquery or CTE, AVG]
+
+WITH CustomerSpending AS
+(
+    SELECT
+        c.CustomerID,
+        c.Name,
+        SUM(o.TotalAmount) AS TotalSpent
+    FROM Customers c
+    INNER JOIN Orders o
+        ON c.CustomerID = o.CustomerID
+    GROUP BY
+        c.CustomerID,
+        c.Name
+),
+
+AverageSpending AS
+(
+    SELECT
+        AVG(TotalSpent) AS AvgSpent
+    FROM CustomerSpending
+)
+
+SELECT
+    cs.CustomerID,
+    cs.Name,
+    cs.TotalSpent,
+    CASE
+        WHEN cs.TotalSpent > a.AvgSpent THEN 'Above Average'
+        WHEN cs.TotalSpent < a.AvgSpent THEN 'Below Average'
+        ELSE 'Average'
+    END AS SpendingCategory
+FROM CustomerSpending cs
+CROSS JOIN AverageSpending a;
+-- Task 7
+-- ------
+-- Write a query that shows monthly revenue totals for the past
+-- 12 months, plus a running cumulative total alongside each month.
+-- [NEW: SUM OVER (window function), DATEPART / FORMAT, ORDER BY]
+WITH MonthlySales AS
+(
+    SELECT
+        DATE_FORMAT(o.OrderDate, '%Y-%m') AS OrderMonth,
+        SUM(oi.Quantity * oi.UnitPrice) AS MonthlyRevenue
+    FROM Orders o
+    INNER JOIN OrderItems oi
+        ON o.OrderID = oi.OrderID
+    WHERE o.OrderDate >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+    GROUP BY DATE_FORMAT(o.OrderDate, '%Y-%m')
+)
+
+SELECT
+    OrderMonth,
+    MonthlyRevenue,
+    SUM(MonthlyRevenue) OVER (ORDER BY OrderMonth) AS RunningTotal
+FROM MonthlySales
+ORDER BY OrderMonth;
+Task 8
+------
+Using a CTE, find customers who placed their first order within
+7 days of registering. Show name, registration date, first order
+date, and the gap in days.
+[NEW: WITH CTE, MIN, DATEDIFF]
+WITH FirstOrders AS
+(
+    SELECT
+        c.CustomerID,
+        c.Name,
+        c.RegistrationDate,
+        MIN(o.OrderDate) AS FirstOrderDate
+    FROM Customers c
+    INNER JOIN Orders o
+        ON c.CustomerID = o.CustomerID
+    GROUP BY
+        c.CustomerID,
+        c.Name,
+        c.RegistrationDate
+)
+
+SELECT
+    Name,
+    RegistrationDate,
+    FirstOrderDate,
+    DATEDIFF(FirstOrderDate, RegistrationDate) AS GapInDays
+FROM FirstOrders
+WHERE DATEDIFF(FirstOrderDate, RegistrationDate) <= 7;
+Task 9
+------
+Write a recursive CTE that builds a full product category
+hierarchy. Each category can have a parent category. Display
+each category with its full path, for example:
+  Electronics > Mobiles > Smartphones
+[NEW: RECURSIVE CTE, anchor member + recursive member]
+WITH RECURSIVE CategoryTree AS
+(
+    -- Anchor member (top-level categories)
+    SELECT
+        CategoryID,
+        CategoryName,
+        ParentCategoryID,
+        CAST(CategoryName AS CHAR(200)) AS FullPath
+    FROM Categories
+    WHERE ParentCategoryID IS NULL
+
+    UNION ALL
+
+    -- Recursive member
+    SELECT
+        c.CategoryID,
+        c.CategoryName,
+        c.ParentCategoryID,
+        CONCAT(ct.FullPath, ' > ', c.CategoryName)
+    FROM Categories c
+    INNER JOIN CategoryTree ct
+        ON c.ParentCategoryID = ct.CategoryID
+)
+
+SELECT
+    CategoryID,
+    CategoryName,
+    FullPath
+FROM CategoryTree
+ORDER BY FullPath;
+Task 10
+-------
+Create a view called vw_customer_order_summary that shows each
+customer's name, total orders, total amount spent, and their
+most recent order date. Then query the view to list the top 10
+customers by spending.
+[NEW: CREATE VIEW, ORDER BY TOP]
+CREATE VIEW vw_customer_order_summary AS
+SELECT
+    c.CustomerID,
+    c.Name,
+    COUNT(o.OrderID) AS TotalOrders,
+    SUM(o.TotalAmount) AS TotalSpent,
+    MAX(o.OrderDate) AS LastOrderDate
+FROM Customers c
+INNER JOIN Orders o
+    ON c.CustomerID = o.CustomerID
+GROUP BY
+    c.CustomerID,
+    c.Name;
+SELECT *
+FROM vw_customer_order_summary
+ORDER BY TotalSpent DESC
+LIMIT 10;
+Task 11
+-------
+Create a non-clustered index to optimise the query from Task 3
+(product revenue report). Before and after creating the index,
+run the query and compare the execution plans. Note which
+operations change.
+[NEW: CREATE INDEX, execution plan analysis]
+SELECT
+    p.ProductID,
+    p.ProductName,
+    SUM(oi.Quantity) AS TotalUnitsSold,
+    SUM(oi.Quantity * oi.UnitPrice) AS TotalRevenue
+FROM Products p
+INNER JOIN OrderItems oi
+    ON p.ProductID = oi.ProductID
+INNER JOIN Orders o
+    ON oi.OrderID = o.OrderID
+GROUP BY
+    p.ProductID,
+    p.ProductName;//before index
+CREATE INDEX idx_orderitems_productid
+ON OrderItems(ProductID);
+
+CREATE INDEX idx_orderitems_orderid
+ON OrderItems(OrderID);
+
+CREATE INDEX idx_orders_orderid
+ON Orders(OrderID);//after index
+TASK 12
+CREATE FUNCTION fn_customer_lifetime_value (@CustomerID INT)
+RETURNS DECIMAL(18,2)
+AS
+BEGIN
+    DECLARE @Total DECIMAL(18,2);
+
+    SELECT @Total = SUM(o.TotalAmount)
+    FROM Orders o
+    INNER JOIN Payments p
+        ON o.OrderID = p.OrderID
+    WHERE o.CustomerID = @CustomerID
+      AND p.Status = 'Paid';
+
+    RETURN ISNULL(@Total, 0);
+END;
+TASK 13
+CREATE FUNCTION fn_order_discount (@OrderID INT)
+RETURNS DECIMAL(18,2)
+AS
+BEGIN
+    DECLARE @Total DECIMAL(18,2);
+    DECLARE @DiscountedTotal DECIMAL(18,2);
+
+    SELECT @Total = SUM(Quantity * UnitPrice)
+    FROM OrderItems
+    WHERE OrderID = @OrderID;
+
+    SET @DiscountedTotal =
+        CASE
+            WHEN @Total > 10000 THEN @Total * 0.90
+            WHEN @Total > 5000  THEN @Total * 0.95
+            ELSE @Total
+        END;
+
+    RETURN @DiscountedTotal;
+END;
+TASK 14
+CREATE FUNCTION fn_orders_by_date_range
+(
+    @StartDate DATE,
+    @EndDate DATE
+)
+RETURNS TABLE
+AS
+RETURN
+(
+    SELECT
+        o.OrderID,
+        o.CustomerID,
+        c.Name AS CustomerName,
+        SUM(oi.Quantity) AS TotalItems,
+        SUM(oi.Quantity * oi.UnitPrice) AS OrderTotal,
+        o.OrderDate
+    FROM Orders o
+    INNER JOIN Customers c
+        ON o.CustomerID = c.CustomerID
+    INNER JOIN OrderItems oi
+        ON o.OrderID = oi.OrderID
+    WHERE o.OrderDate BETWEEN @StartDate AND @EndDate
+    GROUP BY
+        o.OrderID,
+        o.CustomerID,
+        c.Name,
+        o.OrderDate
+);
+TASK 15
+CREATE PROCEDURE sp_place_order
+(
+    @CustomerID INT,
+    @OrderDate DATE
+)
+AS
+BEGIN
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @OrderID INT;
+
+        -- 1. Create Order
+        INSERT INTO Orders (CustomerID, OrderDate, TotalAmount)
+        VALUES (@CustomerID, @OrderDate, 0);
+
+        SET @OrderID = SCOPE_IDENTITY();
+
+        -- (Assume items inserted from temp table or JSON logic)
+
+        -- 2. Deduct stock
+        UPDATE Products
+        SET StockQuantity = StockQuantity - oi.Quantity
+        FROM Products p
+        INNER JOIN OrderItems oi
+            ON p.ProductID = oi.ProductID
+        WHERE oi.OrderID = @OrderID;
+
+        -- 3. Create payment
+        INSERT INTO Payments (OrderID, Status)
+        VALUES (@OrderID, 'Pending');
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRANSACTION;
+
+        SELECT ERROR_MESSAGE() AS ErrorMessage;
+    END CATCH
+END;
+TASK 16
+TASK 16
+CREATE PROCEDURE sp_monthly_sales_report
+(
+    @Year INT,
+    @Month INT,
+    @TotalOrders INT OUTPUT,
+    @TotalRevenue DECIMAL(18,2) OUTPUT
+)
+AS
+BEGIN
+
+    -- Total Orders + Revenue
+    SELECT
+        @TotalOrders = COUNT(DISTINCT o.OrderID),
+        @TotalRevenue = SUM(oi.Quantity * oi.UnitPrice)
+    FROM Orders o
+    INNER JOIN OrderItems oi
+        ON o.OrderID = oi.OrderID
+    WHERE YEAR(o.OrderDate) = @Year
+      AND MONTH(o.OrderDate) = @Month;
+
+    -- Top 5 Products
+    SELECT TOP 5
+        p.ProductName,
+        SUM(oi.Quantity) AS UnitsSold
+    FROM OrderItems oi
+    INNER JOIN Orders o
+        ON oi.OrderID = o.OrderID
+    INNER JOIN Products p
+        ON oi.ProductID = p.ProductID
+    WHERE YEAR(o.OrderDate) = @Year
+      AND MONTH(o.OrderDate) = @Month
+    GROUP BY p.ProductName
+    ORDER BY UnitsSold DESC;
+
+    -- Top 3 Customers
+    SELECT TOP 3
+        c.Name,
+        SUM(o.TotalAmount) AS TotalSpent
+    FROM Orders o
+    INNER JOIN Customers c
+        ON o.CustomerID = c.CustomerID
+    WHERE YEAR(o.OrderDate) = @Year
+      AND MONTH(o.OrderDate) = @Month
+    GROUP BY c.Name
+    ORDER BY TotalSpent DESC;
+
+END;
+TASK 17
+CREATE TABLE RestockAlerts
+(
+    AlertID INT IDENTITY,
+    ProductName VARCHAR(100),
+    CurrentStock INT,
+    AlertTime DATETIME
+);
+DECLARE @ProductID INT;
+DECLARE @ProductName VARCHAR(100);
+DECLARE @Stock INT;
+
+DECLARE cur CURSOR FOR
+SELECT ProductID, ProductName, StockQuantity
+FROM Products
+WHERE StockQuantity < 10;
+
+OPEN cur;
+
+FETCH NEXT FROM cur INTO @ProductID, @ProductName, @Stock;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    INSERT INTO RestockAlerts (ProductName, CurrentStock, AlertTime)
+    VALUES (@ProductName, @Stock, GETDATE());
+
+    FETCH NEXT FROM cur INTO @ProductID, @ProductName, @Stock;
+END;
+
+CLOSE cur;
+DEALLOCATE cur;
+TASK 18
+CREATE TABLE MonthlySalesAudit
+(
+    Year INT,
+    Month INT,
+    TotalOrders INT,
+    TotalRevenue DECIMAL(18,2)
+);
+DECLARE @Month INT = 1;
+DECLARE @Year INT = YEAR(GETDATE());
+
+DECLARE @TotalOrders INT;
+DECLARE @TotalRevenue DECIMAL(18,2);
+
+WHILE @Month <= 12
+BEGIN
+
+    EXEC sp_monthly_sales_report
+        @Year,
+        @Month,
+        @TotalOrders OUTPUT,
+        @TotalRevenue OUTPUT;
+
+    INSERT INTO MonthlySalesAudit
+    VALUES (@Year, @Month, @TotalOrders, @TotalRevenue);
+
+    SET @Month = @Month + 1;
+END;
+DECLARE @Month INT = 1;
+DECLARE @Year INT = YEAR(GETDATE());
+
+DECLARE @TotalOrders INT;
+DECLARE @TotalRevenue DECIMAL(18,2);
+
+WHILE @Month <= 12
+BEGIN
+
+    EXEC sp_monthly_sales_report
+        @Year,
+        @Month,
+        @TotalOrders OUTPUT,
+        @TotalRevenue OUTPUT;
+
+    INSERT INTO MonthlySalesAudit
+    VALUES (@Year, @Month, @TotalOrders, @TotalRevenue);
+
+    SET @Month = @Month + 1;
+END;
